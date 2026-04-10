@@ -59,11 +59,17 @@ if (empty($exts)) {
 
     // Generate direct JSON array for JavaScript to avoid fetch/CORS/parsing issues
     $media_extensions = ['mp4','mkv','webm','ogg','mp3','wav','flac','m4a','aac','m4v','mov','avi','wmv'];
+    $sub_extensions = ['vtt', 'srt'];
+    
     $js_media_files = [];
+    $js_sub_files = [];
+    
     foreach ($files as $f) {
         $e = strtolower(pathinfo($f, PATHINFO_EXTENSION));
         if (in_array($e, $media_extensions, true)) {
             $js_media_files[] = $base_url . $dir_url . '/' . rawurlencode($f);
+        } elseif (in_array($e, $sub_extensions, true)) {
+            $js_sub_files[] = $base_url . $dir_url . '/' . rawurlencode($f);
         }
     }
 ?>
@@ -98,6 +104,17 @@ if (empty($exts)) {
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -4px; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
         input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #4b5563; border-radius: 2px; }
         input[type=range]:focus { outline: none; }
+
+        /* Subtitle (CC) Enhancement */
+        video::cue {
+            background-color: rgba(0, 0, 0, 0.75);
+            color: #ffffff;
+            font-size: 1.1rem;
+            text-shadow: 0px 1px 3px rgba(0,0,0,1);
+        }
+        @media (min-width: 768px) {
+            video::cue { font-size: 1.5rem; }
+        }
     </style>
 </head>
 <body class="bg-gray-950 text-gray-200 font-sans h-screen w-screen overflow-hidden flex flex-col md:flex-row selection:bg-blue-500/30">
@@ -106,7 +123,7 @@ if (empty($exts)) {
     <div class="w-full md:w-auto md:flex-1 flex flex-col bg-black relative z-10 shadow-2xl shrink-0">
         <!-- Media Player Container -->
         <div id="video-container" class="w-full aspect-video md:aspect-auto md:flex-1 flex items-center justify-center bg-black relative group overflow-hidden">
-            <video id="player" autoplay playsinline class="max-w-full max-h-full w-full h-full md:w-auto md:h-auto object-contain outline-none transition-all"></video>
+            <video id="player" autoplay playsinline class="w-full h-full object-contain outline-none transition-all"></video>
             
             <!-- Custom Controls Overlay -->
             <div id="custom-controls" class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 md:p-4 flex flex-col gap-2 transition-opacity duration-300 opacity-100">
@@ -132,7 +149,13 @@ if (empty($exts)) {
                         </div>
                     </div>
                     
-                    <div class="mr-2">
+                    <div class="mr-2 flex items-center gap-4">
+                        <div class="relative flex items-center">
+                            <button id="btn-cc" class="hidden hover:text-blue-400 transition text-sm md:text-base text-gray-400" title="Subtitles"><i class="fas fa-closed-captioning"></i></button>
+                            <div id="cc-menu" class="absolute bottom-full right-[-10px] mb-3 bg-gray-900/95 backdrop-blur border border-gray-700 rounded shadow-xl hidden flex-col min-w-[100px] max-w-[200px] max-h-[200px] overflow-y-auto no-scrollbar z-50 py-1">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
                         <button id="btn-fullscreen" class="hover:text-blue-400 transition text-sm md:text-base"><i class="fas fa-expand"></i></button>
                     </div>
                 </div>
@@ -220,6 +243,8 @@ if (empty($exts)) {
         const btnNext = document.getElementById('btn-next');
         const btnMute = document.getElementById('btn-mute');
         const btnFullscreen = document.getElementById('btn-fullscreen');
+        const btnCc = document.getElementById('btn-cc');
+        const ccMenu = document.getElementById('cc-menu');
         const timeCurrent = document.getElementById('time-current');
         const timeTotal = document.getElementById('time-total');
 
@@ -237,6 +262,8 @@ if (empty($exts)) {
 
         // Initialize allMedia directly from PHP to fix detection bugs
         let allMedia = <?= json_encode($js_media_files, JSON_UNESCAPED_SLASHES) ?>;
+        let allSubs = <?= json_encode($js_sub_files, JSON_UNESCAPED_SLASHES) ?>;
+        
         let recentMedia = JSON.parse(localStorage.getItem('webplayer_recent') || '[]');
         let currentTab = 'all';
         let currentPlayingUrl = '';
@@ -303,10 +330,81 @@ if (empty($exts)) {
             clearTimeout(controlsTimeout);
         });
 
+        // Subtitles (CC) Menu Logic
+        function renderCcMenu() {
+            ccMenu.innerHTML = '';
+            if (!player.textTracks || player.textTracks.length === 0) {
+                btnCc.classList.add('hidden');
+                ccMenu.classList.add('hidden');
+                return;
+            }
+            btnCc.classList.remove('hidden');
+
+            let isAnyShowing = false;
+            for (let i = 0; i < player.textTracks.length; i++) {
+                if (player.textTracks[i].mode === 'showing') isAnyShowing = true;
+            }
+            
+            // Update CC icon color
+            if (isAnyShowing) {
+                btnCc.classList.add('text-blue-400');
+                btnCc.classList.remove('text-gray-400');
+            } else {
+                btnCc.classList.remove('text-blue-400');
+                btnCc.classList.add('text-gray-400');
+            }
+
+            // "Off" button
+            const offBtn = document.createElement('button');
+            offBtn.className = `px-3 py-1.5 text-left text-xs transition-colors whitespace-nowrap ${!isAnyShowing ? 'bg-blue-600/20 text-blue-400 font-bold border-l-2 border-blue-500' : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent'}`;
+            offBtn.innerText = 'Off';
+            offBtn.onclick = (e) => { e.stopPropagation(); setTrack(-1); };
+            ccMenu.appendChild(offBtn);
+
+            // Track buttons
+            for (let i = 0; i < player.textTracks.length; i++) {
+                let track = player.textTracks[i];
+                let isShowing = track.mode === 'showing';
+                let btn = document.createElement('button');
+                btn.className = `px-3 py-1.5 text-left text-xs transition-colors whitespace-nowrap truncate ${isShowing ? 'bg-blue-600/20 text-blue-400 font-bold border-l-2 border-blue-500' : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent'}`;
+                btn.innerText = track.label || `Track ${i + 1}`;
+                btn.onclick = (e) => { e.stopPropagation(); setTrack(i); };
+                ccMenu.appendChild(btn);
+            }
+        }
+
+        function setTrack(index) {
+            for (let i = 0; i < player.textTracks.length; i++) {
+                player.textTracks[i].mode = (i === index) ? 'showing' : 'hidden';
+            }
+            ccMenu.classList.add('hidden');
+            renderCcMenu(); // Re-render to highlight correct item
+        }
+
+        // Listen for embedded tracks loading asynchronously
+        if (player.textTracks) {
+            player.textTracks.addEventListener('addtrack', renderCcMenu);
+            player.textTracks.addEventListener('removetrack', renderCcMenu);
+        }
+
+        btnCc.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!player.textTracks || player.textTracks.length === 0) return;
+            ccMenu.classList.toggle('hidden');
+        });
+        
+        // Close menu when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!ccMenu.contains(e.target) && e.target !== btnCc) {
+                ccMenu.classList.add('hidden');
+            }
+        });
+
         // Time & Progress update
         player.addEventListener('loadedmetadata', () => {
             seekBar.max = player.duration;
             timeTotal.textContent = formatTime(player.duration);
+            setTimeout(renderCcMenu, 200); // Allow browser time to parse embedded tracks
         });
 
         player.addEventListener('timeupdate', () => {
@@ -622,6 +720,51 @@ if (empty($exts)) {
 
         // Trigger Playback & Update Persisted Recents
         function playMedia(url) {
+            // Clear old sidecar subtitles
+            player.innerHTML = '';
+            
+            // Auto-detect and attach sidecar subtitles (.vtt or .srt, including language tags like .en.vtt)
+            let baseFilename = getFilename(url).replace(/\.[^/.]+$/, "");
+            let matchingSubs = allSubs.filter(subUrl => {
+                let subName = getFilename(subUrl);
+                // Matches "video.vtt", "video.srt", or "video.*.vtt" (e.g., "video.en.vtt")
+                return subName === baseFilename + '.vtt' || 
+                       subName === baseFilename + '.srt' ||
+                       subName.startsWith(baseFilename + '.');
+            });
+            
+            matchingSubs.forEach((subUrl, index) => {
+                let track = document.createElement('track');
+                track.src = subUrl;
+                track.kind = 'subtitles';
+                
+                let subName = getFilename(subUrl);
+                let ext = getExtension(subName).toUpperCase();
+                let label = 'Sub ' + (index + 1);
+                
+                // Extract language tag if it exists (e.g., ".en-eEY6OEpapPo.vtt" or ".pt-BR.vtt")
+                let langMatch = subName.substring(baseFilename.length);
+                if (langMatch.startsWith('.') && langMatch.split('.').length > 2) {
+                    let middle = langMatch.substring(1, langMatch.lastIndexOf('.'));
+                    let langCode = middle.toUpperCase();
+                    
+                    // Check if it ends with - followed by 11 characters (common for yt-dlp hashes)
+                    let lastDashIndex = middle.lastIndexOf('-');
+                    if (lastDashIndex > 0 && middle.length - lastDashIndex - 1 === 11) {
+                        langCode = middle.substring(0, lastDashIndex).toUpperCase();
+                    }
+                    
+                    label = langCode; // Display clean language (e.g., "EN" or "PT-BR")
+                } else {
+                    label = ext; // Fallback to "VTT" or "SRT"
+                }
+                
+                track.label = label;
+                player.appendChild(track);
+            });
+            
+            renderCcMenu();
+
             if (currentPlayingUrl !== url) {
                 player.src = url;
                 player.play().catch(e => console.error("Playback error:", e));
