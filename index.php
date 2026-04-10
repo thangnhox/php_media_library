@@ -24,6 +24,8 @@ $exts = array_filter(
 $shuffle = isset($_GET['shuffle']) &&
            in_array(strtolower($_GET['shuffle']), ['1','true','yes'], true);
 
+$search_query = strtolower($_GET['search'] ?? '');
+
 /* --------------------------------------------------
    Scan directory once
 -------------------------------------------------- */
@@ -433,6 +435,7 @@ if (empty($exts)) {
             // Build the absolute M3U API URL
             let m3uUrl = window.location.origin + window.location.pathname + `?ext=${extsToExport}&format=m3u`;
             if (isShuffle) m3uUrl += '&shuffle=1';
+            if (searchQuery) m3uUrl += `&search=${encodeURIComponent(searchQuery)}`;
             
             // Copy to clipboard safely
             const tempInput = document.createElement('input');
@@ -688,6 +691,9 @@ $result = [];
 foreach ($files as $f) {
     $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
     if (in_array($ext, $exts, true)) {
+        if ($search_query !== '' && strpos(strtolower($f), $search_query) === false) {
+            continue;
+        }
         $result[] = $base_url . $dir_url . '/' . rawurlencode($f);
     }
 }
