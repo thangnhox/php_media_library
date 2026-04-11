@@ -141,6 +141,7 @@ if (empty($exts)) {
                         <button id="btn-prev" class="hover:text-blue-400 transition text-sm md:text-base" title="Previous"><i class="fas fa-step-backward"></i></button>
                         <button id="btn-play-pause" class="hover:text-blue-400 transition text-xl md:text-2xl w-6 flex justify-center"><i class="fas fa-pause"></i></button>
                         <button id="btn-next" class="hover:text-blue-400 transition text-sm md:text-base" title="Next"><i class="fas fa-step-forward"></i></button>
+                        <button id="btn-loop" class="hover:text-blue-400 transition text-sm md:text-base text-gray-400 relative" title="Loop: Off"><i class="fas fa-redo"></i></button>
                         
                         <!-- Volume -->
                         <div class="flex items-center gap-2 group/vol ml-2 md:ml-4">
@@ -241,6 +242,7 @@ if (empty($exts)) {
         const btnPlayPause = document.getElementById('btn-play-pause');
         const btnPrev = document.getElementById('btn-prev');
         const btnNext = document.getElementById('btn-next');
+        const btnLoop = document.getElementById('btn-loop');
         const btnMute = document.getElementById('btn-mute');
         const btnFullscreen = document.getElementById('btn-fullscreen');
         const btnCc = document.getElementById('btn-cc');
@@ -273,6 +275,7 @@ if (empty($exts)) {
         let activeCategory = 'all';
         let currentlyPlayingElement = null; // NEW: tracks the active DOM element
         let controlsTimeout;
+        let loopMode = 0; // 0 = Off, 1 = All, 2 = Current
 
         // --- Custom Player Logic ---
         
@@ -426,6 +429,38 @@ if (empty($exts)) {
             updateMuteIcon();
         }
 
+        // Loop State
+        const savedLoop = localStorage.getItem('webplayer_loop');
+        if (savedLoop !== null) {
+            loopMode = parseInt(savedLoop);
+        }
+        updateLoopButton(); // Initialize button state
+
+        function updateLoopButton() {
+            if (loopMode === 0) {
+                btnLoop.classList.remove('text-blue-400');
+                btnLoop.classList.add('text-gray-400');
+                btnLoop.title = "Loop: Off";
+                btnLoop.innerHTML = '<i class="fas fa-redo"></i>';
+            } else if (loopMode === 1) {
+                btnLoop.classList.remove('text-gray-400');
+                btnLoop.classList.add('text-blue-400');
+                btnLoop.title = "Loop: All";
+                btnLoop.innerHTML = '<i class="fas fa-redo"></i>';
+            } else if (loopMode === 2) {
+                btnLoop.classList.remove('text-gray-400');
+                btnLoop.classList.add('text-blue-400');
+                btnLoop.title = "Loop: Current";
+                btnLoop.innerHTML = '<div class="relative"><i class="fas fa-redo"></i><span class="absolute -bottom-1 -right-1.5 text-[9px] font-black bg-gray-900 rounded px-[2px] leading-none">1</span></div>';
+            }
+        }
+
+        btnLoop.addEventListener('click', () => {
+            loopMode = (loopMode + 1) % 3;
+            localStorage.setItem('webplayer_loop', loopMode);
+            updateLoopButton();
+        });
+
         volumeBar.addEventListener('input', () => {
             player.volume = volumeBar.value;
             player.muted = false;
@@ -471,8 +506,16 @@ if (empty($exts)) {
         });
 
         // Next / Prev Logic
-        function playNext() {
+        function playNext(manual = false) {
             if (currentPlaylistOrder.length === 0) return;
+            
+            // If auto-advancing and "Loop Current" is active
+            if (!manual && loopMode === 2) {
+                player.currentTime = 0;
+                player.play();
+                return;
+            }
+
             if (isShuffle) {
                 let randomIndex = Math.floor(Math.random() * currentPlaylistOrder.length);
                 playMedia(currentPlaylistOrder[randomIndex]);
@@ -480,26 +523,42 @@ if (empty($exts)) {
                 let idx = currentPlaylistOrder.indexOf(currentPlayingUrl);
                 if (idx >= 0 && idx + 1 < currentPlaylistOrder.length) {
                     playMedia(currentPlaylistOrder[idx + 1]);
+                } else if (loopMode === 1 && currentPlaylistOrder.length > 0) {
+                    // Loop All wraps around
+                    playMedia(currentPlaylistOrder[0]);
                 }
             }
         }
 
         function playPrev() {
             if (currentPlaylistOrder.length === 0) return;
+            
+            // If more than 3 seconds in, just restart current track
+            if (player.currentTime > 3) {
+                player.currentTime = 0;
+                player.play();
+                return;
+            }
+
             let idx = currentPlaylistOrder.indexOf(currentPlayingUrl);
             if (idx > 0) {
                 playMedia(currentPlaylistOrder[idx - 1]);
             } else if (idx === 0 && currentPlaylistOrder.length > 0) {
-                player.currentTime = 0;
-                player.play();
+                if (loopMode === 1) {
+                    // Loop All wraps around to the back
+                    playMedia(currentPlaylistOrder[currentPlaylistOrder.length - 1]);
+                } else {
+                    player.currentTime = 0;
+                    player.play();
+                }
             }
         }
 
-        btnNext.addEventListener('click', playNext);
+        btnNext.addEventListener('click', () => playNext(true));
         btnPrev.addEventListener('click', playPrev);
 
         // Auto-advance track on ended
-        player.addEventListener('ended', playNext);
+        player.addEventListener('ended', () => playNext(false));
 
         // 3. Action Buttons Logic
         btnPlayAll.onclick = () => {
