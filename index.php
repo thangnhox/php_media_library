@@ -517,8 +517,16 @@ if (empty($exts)) {
             }
 
             if (isShuffle) {
-                let randomIndex = Math.floor(Math.random() * currentPlaylistOrder.length);
-                playMedia(currentPlaylistOrder[randomIndex]);
+                if (currentPlaylistOrder.length > 1) {
+                    let randomIndex;
+                    do {
+                        randomIndex = Math.floor(Math.random() * currentPlaylistOrder.length);
+                    } while (currentPlaylistOrder[randomIndex] === currentPlayingUrl);
+                    playMedia(currentPlaylistOrder[randomIndex]);
+                } else {
+                    player.currentTime = 0;
+                    player.play();
+                }
             } else {
                 let idx = currentPlaylistOrder.indexOf(currentPlayingUrl);
                 if (idx >= 0 && idx + 1 < currentPlaylistOrder.length) {
@@ -566,9 +574,14 @@ if (empty($exts)) {
         };
 
         btnRandom.onclick = () => {
-            if (currentPlaylistOrder.length > 0) {
-                let randomIndex = Math.floor(Math.random() * currentPlaylistOrder.length);
+            if (currentPlaylistOrder.length > 1) {
+                let randomIndex;
+                do {
+                    randomIndex = Math.floor(Math.random() * currentPlaylistOrder.length);
+                } while (currentPlaylistOrder[randomIndex] === currentPlayingUrl);
                 playMedia(currentPlaylistOrder[randomIndex]);
+            } else if (currentPlaylistOrder.length === 1) {
+                playMedia(currentPlaylistOrder[0]);
             }
         };
 
