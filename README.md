@@ -86,4 +86,4 @@ The Web Player utilizes your browser's localStorage to remember:
 
 ## 📝 License
 
-This project is open-source and available under the MIT License. Feel free to modify and distribute as needed.
+This project is open-source and available under the CC0 License. Feel free to modify and distribute as needed.
