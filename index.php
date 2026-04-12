@@ -165,7 +165,12 @@ if (empty($exts)) {
         
         <!-- Now Playing Header -->
         <div class="p-3 md:p-6 bg-gray-900 border-t border-gray-800 flex flex-col justify-center min-h-[60px] md:min-h-[100px]">
-            <p class="text-[10px] md:text-xs font-bold text-blue-500 uppercase tracking-wider mb-0.5 md:mb-1">Now Playing</p>
+            <div class="flex items-center justify-between mb-0.5 md:mb-1">
+                <p class="text-[10px] md:text-xs font-bold text-blue-500 uppercase tracking-wider">Now Playing</p>
+                <button id="btn-locate" class="hidden text-gray-400 hover:text-blue-400 transition-colors text-xs md:text-sm" title="Locate playing file in list">
+                    <i class="fas fa-crosshairs"></i>
+                </button>
+            </div>
             <h2 id="now-playing" class="text-sm md:text-xl font-semibold text-white truncate drop-shadow-md">
                 Select a file to play
             </h2>
@@ -249,6 +254,7 @@ if (empty($exts)) {
         const ccMenu = document.getElementById('cc-menu');
         const timeCurrent = document.getElementById('time-current');
         const timeTotal = document.getElementById('time-total');
+        const btnLocate = document.getElementById('btn-locate');
 
         const tabAll = document.getElementById('tab-all');
         const tabRecent = document.getElementById('tab-recent');
@@ -755,8 +761,32 @@ if (empty($exts)) {
             }
         }
 
+        // Helper: Scroll active item into view smoothly
+        function scrollToActiveItem(forceCenter = false) {
+            if (currentlyPlayingElement) {
+                currentlyPlayingElement.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: forceCenter ? 'center' : 'nearest' 
+                });
+            }
+        }
+
+        btnLocate.addEventListener('click', () => {
+            // Ensure the item is visible by clearing search/filters if necessary
+            if (searchQuery !== '' || (currentTab === 'all' && activeCategory !== 'all')) {
+                searchInput.value = '';
+                searchQuery = '';
+                activeCategory = 'all';
+                renderCategoryTabs();
+                renderList('center');
+            } else {
+                if (!currentlyPlayingElement) renderList('center');
+                else scrollToActiveItem(true);
+            }
+        });
+
         // Render the active playlist (Optimized with DocumentFragment)
-        function renderList() {
+        function renderList(scrollMode = false) {
             let previousScroll = container.scrollTop; // Save scroll position
             container.innerHTML = '';
             currentlyPlayingElement = null; // Reset tracker
@@ -784,9 +814,13 @@ if (empty($exts)) {
             
             container.appendChild(fragment); // Inject once for max performance
 
-            // Restore scroll position
+            // Restore scroll position or autoscroll
             requestAnimationFrame(() => {
-                container.scrollTop = previousScroll;
+                if (scrollMode && currentlyPlayingElement) {
+                    scrollToActiveItem(scrollMode === 'center');
+                } else {
+                    container.scrollTop = previousScroll;
+                }
             });
         }
 
@@ -852,12 +886,15 @@ if (empty($exts)) {
             if (recentMedia.length > 50) recentMedia.pop(); // Keep last 50
             localStorage.setItem('webplayer_recent', JSON.stringify(recentMedia));
 
+            btnLocate.classList.remove('hidden');
+
             // Only rebuild the whole DOM if we are on the Recents tab (because order changes).
             // Otherwise, efficiently update just the active CSS classes.
             if (currentTab === 'all') {
                 updateActiveItemState(url);
+                requestAnimationFrame(() => scrollToActiveItem(false));
             } else {
-                renderList();
+                renderList(true);
             }
         }
 
