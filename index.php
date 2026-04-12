@@ -182,9 +182,14 @@ if (empty($exts)) {
         
         <!-- Header & Search -->
         <div class="p-2 md:p-4 border-b border-gray-800 bg-gray-900 shrink-0">
-            <h1 class="text-base md:text-lg font-bold text-white mb-2 md:mb-3 flex items-center gap-2">
-                <i class="fas fa-play-circle text-blue-500"></i> Media Library
-            </h1>
+            <div class="flex items-center justify-between mb-2 md:mb-3">
+                <h1 class="text-base md:text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fas fa-play-circle text-blue-500"></i> Media Library
+                </h1>
+                <button id="btn-reload" class="text-gray-400 hover:text-blue-400 transition-colors text-xs md:text-sm" title="Reload Playlist">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
             <div class="relative">
                 <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500"></i>
                 <input type="text" id="search-input" placeholder="Search files..." 
@@ -228,7 +233,7 @@ if (empty($exts)) {
         </div>
 
         <!-- Playlist Container -->
-        <div class="flex-1 overflow-y-auto p-1 md:p-2 pb-6 bg-gray-900" id="playlist-container">
+        <div class="flex-1 overflow-y-auto relative p-1 md:p-2 pb-6 bg-gray-900" id="playlist-container">
             <div class="flex items-center justify-center h-full">
                 <div class="animate-pulse flex flex-col items-center gap-3">
                     <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
@@ -262,6 +267,7 @@ if (empty($exts)) {
         const nowPlaying = document.getElementById('now-playing');
         const searchInput = document.getElementById('search-input');
         const categoryTabs = document.getElementById('category-tabs');
+        const btnReload = document.getElementById('btn-reload');
         
         const btnPlayAll = document.getElementById('btn-play-all');
         const btnRandom = document.getElementById('btn-random');
@@ -674,6 +680,12 @@ if (empty($exts)) {
 
             let exts = new Set();
             allMedia.forEach(url => exts.add(getExtension(getFilename(url))));
+            
+            // Safety fallback if active category disappears during background reload
+            if (activeCategory !== 'all' && !exts.has(activeCategory)) {
+                activeCategory = 'all';
+            }
+
             let sortedExts = Array.from(exts).sort();
 
             if (sortedExts.length <= 1) {
@@ -761,14 +773,32 @@ if (empty($exts)) {
             }
         }
 
-        // Helper: Scroll active item into view smoothly
-        function scrollToActiveItem(forceCenter = false) {
-            if (currentlyPlayingElement) {
-                currentlyPlayingElement.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: forceCenter ? 'center' : 'nearest' 
-                });
+        // Helper: Scroll active item into view smoothly, but fallback to instant for large jumps
+        function scrollToActiveItem(mode = false) {
+            if (!currentlyPlayingElement) return;
+
+            let forceCenter = mode === 'center' || mode === 'center_instant';
+            let instant = mode === 'center_instant' || mode === 'instant';
+
+            // Prevent smooth-scroll bouncing on large lists with content-visibility
+            if (!instant) {
+                const elTop = currentlyPlayingElement.offsetTop;
+                const contTop = container.scrollTop;
+                // If jumping more than a full screen length, use instant scroll to avoid rendering glitches
+                if (Math.abs(elTop - contTop) > container.clientHeight * 1.5) {
+                    instant = true;
+                }
             }
+
+            // Tiny timeout ensures DOM is fully painted before scrolling calculation triggers
+            setTimeout(() => {
+                if (currentlyPlayingElement) {
+                    currentlyPlayingElement.scrollIntoView({ 
+                        behavior: instant ? 'auto' : 'smooth', 
+                        block: forceCenter ? 'center' : 'nearest' 
+                    });
+                }
+            }, 10);
         }
 
         btnLocate.addEventListener('click', () => {
@@ -778,10 +808,10 @@ if (empty($exts)) {
                 searchQuery = '';
                 activeCategory = 'all';
                 renderCategoryTabs();
-                renderList('center');
+                renderList('center_instant');
             } else {
-                if (!currentlyPlayingElement) renderList('center');
-                else scrollToActiveItem(true);
+                if (!currentlyPlayingElement) renderList('center_instant');
+                else scrollToActiveItem('center_instant');
             }
         });
 
@@ -923,6 +953,37 @@ if (empty($exts)) {
             searchTimeout = setTimeout(() => {
                 renderList();
             }, 150);
+        });
+
+        // Background Playlist Reload
+        btnReload.addEventListener('click', () => {
+            const icon = btnReload.querySelector('i');
+            icon.classList.add('fa-spin', 'text-blue-400');
+            
+            const mediaExts = 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv';
+            const subExts = 'vtt,srt';
+            const fetchUrl = `<?= htmlspecialchars($self) ?>?ext=${mediaExts},${subExts}&format=txt`;
+            
+            fetch(fetchUrl)
+                .then(r => r.text())
+                .then(txt => {
+                    const files = txt.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                    allMedia = files.filter(f => {
+                        const ext = getExtension(getFilename(f));
+                        return !['vtt', 'srt'].includes(ext);
+                    });
+                    allSubs = files.filter(f => {
+                        const ext = getExtension(getFilename(f));
+                        return ['vtt', 'srt'].includes(ext);
+                    });
+                    
+                    renderCategoryTabs();
+                    renderList();
+                })
+                .catch(err => console.error("Reload failed:", err))
+                .finally(() => {
+                    setTimeout(() => icon.classList.remove('fa-spin', 'text-blue-400'), 500);
+                });
         });
 
         // Initialize App Directly
