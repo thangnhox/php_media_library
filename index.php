@@ -802,12 +802,11 @@ if (empty($exts)) {
         }
 
         btnLocate.addEventListener('click', () => {
-            // Ensure the item is visible by clearing search/filters if necessary
-            if (searchQuery !== '' || (currentTab === 'all' && activeCategory !== 'all')) {
+            // Ensure the item is visible by clearing search if necessary.
+            // (Does not reset the active category filter per user request)
+            if (searchQuery !== '') {
                 searchInput.value = '';
                 searchQuery = '';
-                activeCategory = 'all';
-                renderCategoryTabs();
                 renderList('center_instant');
             } else {
                 if (!currentlyPlayingElement) renderList('center_instant');
