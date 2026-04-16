@@ -226,10 +226,17 @@ if (empty($exts)) {
                 <i class="fas fa-random text-[10px] md:text-sm"></i> 
                 <span class="text-[9px] md:text-xs font-bold leading-none">Shuffle</span>
             </button>
-            <button id="btn-copy-link" class="py-1.5 md:py-2 bg-purple-600/80 hover:bg-purple-500 text-white rounded flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 shadow-sm transition-colors" title="Copy M3U playlist link to clipboard">
-                <i class="fas fa-link text-[10px] md:text-sm"></i> 
-                <span class="text-[9px] md:text-xs font-bold leading-none">Copy Link</span>
-            </button>
+            <div class="relative w-full h-full">
+                <button id="btn-copy-link" class="w-full h-full py-1.5 md:py-2 bg-purple-600/80 hover:bg-purple-500 text-white rounded flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 shadow-sm transition-colors" title="Copy playlist link to clipboard">
+                    <i class="fas fa-link text-[10px] md:text-sm"></i> 
+                    <span class="text-[9px] md:text-xs font-bold leading-none">Copy Link</span>
+                </button>
+                <div id="copy-menu" class="absolute bottom-full right-0 mb-2 bg-gray-900/95 backdrop-blur border border-gray-700 rounded shadow-xl hidden flex-col min-w-[120px] overflow-hidden z-50">
+                    <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors border-b border-gray-800" data-format="m3u">.M3U Playlist</button>
+                    <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors border-b border-gray-800" data-format="m3u8">.M3U8 Playlist</button>
+                    <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors" data-format="txt">Plain .TXT</button>
+                </div>
+            </div>
         </div>
 
         <!-- Playlist Container -->
@@ -273,6 +280,8 @@ if (empty($exts)) {
         const btnRandom = document.getElementById('btn-random');
         const btnShuffle = document.getElementById('btn-shuffle');
         const btnCopyLink = document.getElementById('btn-copy-link');
+        const copyMenu = document.getElementById('copy-menu');
+        const copyOptions = document.querySelectorAll('.copy-option');
 
         // Initialize allMedia directly from PHP to fix detection bugs
         let allMedia = <?= json_encode($js_media_files, JSON_UNESCAPED_SLASHES) ?>;
@@ -608,37 +617,56 @@ if (empty($exts)) {
             }
         };
 
-        btnCopyLink.onclick = () => {
-            // Determine which extensions to export based on the active tab/category
-            let extsToExport = activeCategory === 'all' 
-                ? 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv' 
-                : activeCategory;
-            
-            // Build the absolute M3U API URL
-            let m3uUrl = window.location.origin + window.location.pathname + `?ext=${extsToExport}&format=m3u`;
-            if (isShuffle) m3uUrl += '&shuffle=1';
-            if (searchQuery) m3uUrl += `&search=${encodeURIComponent(searchQuery)}`;
-            
-            // Copy to clipboard safely
-            const tempInput = document.createElement('input');
-            tempInput.value = m3uUrl;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
+        btnCopyLink.addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyMenu.classList.toggle('hidden');
+        });
 
-            // Visual confirmation
-            const originalHtml = btnCopyLink.innerHTML;
-            btnCopyLink.innerHTML = '<i class="fas fa-check text-[10px] md:text-sm"></i> <span class="text-[9px] md:text-xs font-bold leading-none">Copied!</span>';
-            btnCopyLink.classList.replace('bg-purple-600/80', 'bg-green-600');
-            btnCopyLink.classList.replace('hover:bg-purple-500', 'hover:bg-green-500');
-            
-            setTimeout(() => {
-                btnCopyLink.innerHTML = originalHtml;
-                btnCopyLink.classList.replace('bg-green-600', 'bg-purple-600/80');
-                btnCopyLink.classList.replace('hover:bg-green-500', 'hover:bg-purple-500');
-            }, 2000);
-        };
+        copyOptions.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyMenu.classList.add('hidden');
+                
+                const format = btn.getAttribute('data-format');
+                
+                // Determine which extensions to export based on the active tab/category
+                let extsToExport = activeCategory === 'all' 
+                    ? 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv' 
+                    : activeCategory;
+                
+                // Build the absolute API URL
+                let apiUrl = window.location.origin + window.location.pathname + `?ext=${extsToExport}&format=${format}`;
+                if (isShuffle) apiUrl += '&shuffle=1';
+                if (searchQuery) apiUrl += `&search=${encodeURIComponent(searchQuery)}`;
+                
+                // Copy to clipboard safely
+                const tempInput = document.createElement('input');
+                tempInput.value = apiUrl;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+
+                // Visual confirmation
+                const originalHtml = btnCopyLink.innerHTML;
+                btnCopyLink.innerHTML = '<i class="fas fa-check text-[10px] md:text-sm"></i> <span class="text-[9px] md:text-xs font-bold leading-none">Copied!</span>';
+                btnCopyLink.classList.replace('bg-purple-600/80', 'bg-green-600');
+                btnCopyLink.classList.replace('hover:bg-purple-500', 'hover:bg-green-500');
+                
+                setTimeout(() => {
+                    btnCopyLink.innerHTML = originalHtml;
+                    btnCopyLink.classList.replace('bg-green-600', 'bg-purple-600/80');
+                    btnCopyLink.classList.replace('hover:bg-green-500', 'hover:bg-purple-500');
+                }, 2000);
+            });
+        });
+
+        // Close menu when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!copyMenu.contains(e.target) && e.target !== btnCopyLink) {
+                copyMenu.classList.add('hidden');
+            }
+        });
 
         // Helper: Extract filename from URL
         function getFilename(url) {
@@ -1006,7 +1034,11 @@ foreach ($files as $f) {
         if ($search_query !== '' && strpos(strtolower($f), $search_query) === false) {
             continue;
         }
-        $result[] = $base_url . $dir_url . '/' . rawurlencode($f);
+        
+        $result[] = [
+            'name' => $f,
+            'url' => $base_url . $dir_url . '/' . rawurlencode($f)
+        ];
     }
 }
 
@@ -1017,12 +1049,17 @@ if ($shuffle) {
 /* --------------------------------------------------
    Output
 -------------------------------------------------- */
-if ($format === 'm3u') {
+if ($format === 'm3u' || $format === 'm3u8') {
     $dl_name = empty($exts) ? 'playlist' : implode('_', $exts);
     header('Content-Type: audio/x-mpegurl; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $dl_name . '.m3u"');
-    echo "#EXTM3U\n" . implode("\n", $result);
+    header('Content-Disposition: attachment; filename="' . $dl_name . '.' . $format . '"');
+    echo "#EXTM3U\n";
+    foreach ($result as $item) {
+        echo "#EXTINF:-1," . $item['name'] . "\n";
+        echo $item['url'] . "\n";
+    }
 } else {
     header('Content-Type: text/plain; charset=utf-8');
-    echo implode("\n", $result);
+    $urls = array_column($result, 'url');
+    echo implode("\n", $urls);
 }
