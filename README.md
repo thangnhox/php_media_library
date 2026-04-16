@@ -47,7 +47,7 @@ You can bypass the Web Player and generate raw text lists or .m3u playlists for 
 | Parameter | Type    | Default | Description                                                                                                |
 |-----------|---------|---------|------------------------------------------------------------------------------------------------------------|
 | ext       | String  | (none)  | Required to trigger API mode. Comma-separated list of file extensions to include (e.g., mp4,mkv,mp3).      |
-| format    | String  | txt     | Output format. Use m3u to generate a downloadable M3U playlist file, or txt for a plain text list of URLs. |
+| format    | String  | txt     | Output format. Format of downloadable playlist file (supported txt, m3u, m3u8, xspf).                      |
 | shuffle   | Boolean | false   | Pass 1, true, or yes to randomize the order of the files in the output.                                    |
 | search    | String  | (empty) | Filter the results by a specific search keyword.                                                           |
 
