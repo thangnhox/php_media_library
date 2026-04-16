@@ -234,6 +234,7 @@ if (empty($exts)) {
                 <div id="copy-menu" class="absolute bottom-full right-0 mb-2 bg-gray-900/95 backdrop-blur border border-gray-700 rounded shadow-xl hidden flex-col min-w-[120px] overflow-hidden z-50">
                     <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors border-b border-gray-800" data-format="m3u">.M3U Playlist</button>
                     <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors border-b border-gray-800" data-format="m3u8">.M3U8 Playlist</button>
+                    <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors border-b border-gray-800" data-format="xspf">.XSPF Playlist</button>
                     <button class="copy-option px-3 py-2 text-left text-xs font-bold text-gray-300 hover:bg-blue-600 hover:text-white transition-colors" data-format="txt">Plain .TXT</button>
                 </div>
             </div>
@@ -1058,6 +1059,21 @@ if ($format === 'm3u' || $format === 'm3u8') {
         echo "#EXTINF:-1," . $item['name'] . "\n";
         echo $item['url'] . "\n";
     }
+} elseif ($format === 'xspf') {
+    $dl_name = empty($exts) ? 'playlist' : implode('_', $exts);
+    header('Content-Type: application/xspf+xml; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $dl_name . '.xspf"');
+    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    echo "<playlist version=\"1\" xmlns=\"http://xspf.org/ns/0/\">\n";
+    echo "  <trackList>\n";
+    foreach ($result as $item) {
+        echo "    <track>\n";
+        echo "      <location>" . htmlspecialchars($item['url'], ENT_XML1 | ENT_QUOTES, 'UTF-8') . "</location>\n";
+        echo "      <title>" . htmlspecialchars($item['name'], ENT_XML1 | ENT_QUOTES, 'UTF-8') . "</title>\n";
+        echo "    </track>\n";
+    }
+    echo "  </trackList>\n";
+    echo "</playlist>\n";
 } else {
     header('Content-Type: text/plain; charset=utf-8');
     $urls = array_column($result, 'url');
