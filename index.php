@@ -13,7 +13,7 @@ $self = $_SERVER['SCRIPT_NAME'];
 $dir_url = rtrim(dirname($self), '/');
 
 /* --------------------------------------------------
-   Params
+   Params & Secrets Check
 -------------------------------------------------- */
 $format = strtolower($_GET['format'] ?? 'txt');
 
@@ -25,6 +25,68 @@ $shuffle = isset($_GET['shuffle']) &&
            in_array(strtolower($_GET['shuffle']), ['1','true','yes'], true);
 
 $search_query = strtolower($_GET['search'] ?? '');
+
+$env_secret = getenv('PHP_SECRET_KEY');
+if ($env_secret === false) {
+    $env_secret = $_ENV['PHP_SECRET_KEY'] ?? $_SERVER['PHP_SECRET_KEY'] ?? '';
+}
+$ytdlp_enabled = !empty($env_secret);
+
+/* --------------------------------------------------
+   YT-DLP DOWNLOAD API
+-------------------------------------------------- */
+if (isset($_GET['action']) && $_GET['action'] === 'ytdlp') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    if (!$ytdlp_enabled) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Downloader feature is disabled (Secret key not set).']);
+        exit;
+    }
+
+    $postData = json_decode(file_get_contents('php://input'), true) ?? [];
+    $provided_secret = $postData['secret'] ?? '';
+    $yt_id = $postData['id'] ?? '';
+    $dl_format = $postData['format'] ?? 'mp4';
+
+    if ($provided_secret !== $env_secret) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid secret key.']);
+        exit;
+    }
+
+    if (empty($yt_id)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'No YouTube ID or URL provided.']);
+        exit;
+    }
+
+    // Sanitize input
+    $target = escapeshellarg($yt_id);
+    
+    // Execute yt-dlp
+    $out_tmpl = escapeshellarg(__DIR__ . '/%(title)s.%(ext)s');
+    
+    if ($dl_format === 'mp3') {
+        // Best quality audio, extracted and converted to mp3, include sub
+        $cmd = "yt-dlp -f bestaudio -x --audio-format mp3 --audio-quality 0 --write-subs --sub-langs \"en.*,-live_chat\" -o $out_tmpl $target 2>&1";
+    } else {
+        // Hard limit to best 720p vp9+aac, fallback to best 720p, merge to mp4 container, embed sub
+        $f_args = "bestvideo[height<=720][vcodec*=vp9]+bestaudio[acodec*=aac]/bestvideo[height<=720][ext=webm]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]";
+        $cmd = "yt-dlp -f \"$f_args\" --merge-output-format mp4 --write-subs --embed-subs --sub-langs \"en.*,-live_chat\" -o $out_tmpl $target 2>&1";
+    }
+    
+    exec($cmd, $output, $return_var);
+
+    if ($return_var !== 0) {
+        http_response_code(500);
+        echo json_encode(['error' => 'yt-dlp failed.', 'details' => implode("\n", $output)]);
+        exit;
+    }
+
+    echo json_encode(['success' => true, 'message' => 'Download complete!']);
+    exit;
+}
 
 /* --------------------------------------------------
    Scan directory once
@@ -186,9 +248,16 @@ if (empty($exts)) {
                 <h1 class="text-base md:text-lg font-bold text-white flex items-center gap-2">
                     <i class="fas fa-play-circle text-blue-500"></i> Media Library
                 </h1>
-                <button id="btn-reload" class="text-gray-400 hover:text-blue-400 transition-colors text-xs md:text-sm" title="Reload Playlist">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
+                <div class="flex items-center gap-3">
+                    <?php if ($ytdlp_enabled): ?>
+                    <button id="btn-ytdlp-open" class="text-blue-500 hover:text-blue-400 transition-colors text-xs md:text-sm" title="Download from YouTube">
+                        <i class="fas fa-cloud-download-alt"></i>
+                    </button>
+                    <?php endif; ?>
+                    <button id="btn-reload" class="text-gray-400 hover:text-blue-400 transition-colors text-xs md:text-sm" title="Reload Playlist">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
             </div>
             <div class="relative">
                 <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500"></i>
@@ -207,7 +276,7 @@ if (empty($exts)) {
             </button>
         </div>
 
-        <!-- Category Filter Tabs (NEW) -->
+        <!-- Category Filter Tabs -->
         <div id="category-tabs" class="flex overflow-x-auto bg-gray-900 border-b border-gray-800 px-2 md:px-3 py-1.5 md:py-2 gap-1.5 md:gap-2 no-scrollbar shrink-0" style="display: none;">
             <!-- Populated by JS -->
         </div>
@@ -250,6 +319,41 @@ if (empty($exts)) {
             </div>
         </div>
     </div>
+
+    <!-- YT-DLP Download Modal -->
+    <?php if ($ytdlp_enabled): ?>
+    <div id="ytdlp-modal" class="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center hidden opacity-0 transition-opacity duration-300">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5 md:p-6 w-[90%] max-w-md shadow-2xl transform scale-95 transition-transform duration-300">
+            <h3 class="text-lg font-bold text-white mb-4"><i class="fas fa-cloud-download-alt text-blue-500 mr-2"></i>Download Media</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">YouTube ID or URL</label>
+                    <input type="text" id="ytdlp-id" placeholder="e.g. dQw4w9WgXcQ" autocomplete="off" class="w-full bg-gray-950 border border-gray-700 rounded-lg py-2 px-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Admin Secret Key</label>
+                    <input type="password" id="ytdlp-secret" placeholder="••••••••" class="w-full bg-gray-950 border border-gray-700 rounded-lg py-2 px-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Format</label>
+                    <select id="ytdlp-format" class="w-full bg-gray-950 border border-gray-700 rounded-lg py-2 px-3 text-sm text-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                        <option value="mp4">Video (MP4, up to 720p VP9+AAC)</option>
+                        <option value="mp3">Audio (MP3, Best Quality)</option>
+                    </select>
+                </div>
+                
+                <div id="ytdlp-status" class="text-xs hidden rounded p-2"></div>
+                
+                <div class="flex justify-end gap-3 mt-6">
+                    <button id="btn-ytdlp-cancel" class="px-4 py-2 rounded text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition">Cancel</button>
+                    <button id="btn-ytdlp-submit" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold flex items-center gap-2 shadow transition">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <script>
         const player = document.getElementById('player');
@@ -295,13 +399,12 @@ if (empty($exts)) {
         let isShuffle = false;
         let currentPlaylistOrder = []; // Tracks actual playback sequence
         let activeCategory = 'all';
-        let currentlyPlayingElement = null; // NEW: tracks the active DOM element
+        let currentlyPlayingElement = null; // tracks the active DOM element
         let controlsTimeout;
         let loopMode = 0; // 0 = Off, 1 = All, 2 = Current
 
         // --- Custom Player Logic ---
         
-        // Format time helper
         function formatTime(seconds) {
             if (isNaN(seconds)) return "0:00";
             const m = Math.floor(seconds / 60);
@@ -309,7 +412,6 @@ if (empty($exts)) {
             return `${m}:${s < 10 ? '0' : ''}${s}`;
         }
 
-        // Hide controls on inactivity
         function resetControlsTimeout() {
             if (customControls.classList.contains('opacity-0')) {
                 customControls.classList.remove('opacity-0');
@@ -336,7 +438,6 @@ if (empty($exts)) {
             if(e.target === player) togglePlayPause();
         });
 
-        // Play/Pause toggle
         function togglePlayPause() {
             if (player.paused) player.play();
             else player.pause();
@@ -370,7 +471,6 @@ if (empty($exts)) {
                 if (player.textTracks[i].mode === 'showing') isAnyShowing = true;
             }
             
-            // Update CC icon color
             if (isAnyShowing) {
                 btnCc.classList.add('text-blue-400');
                 btnCc.classList.remove('text-gray-400');
@@ -379,14 +479,12 @@ if (empty($exts)) {
                 btnCc.classList.add('text-gray-400');
             }
 
-            // "Off" button
             const offBtn = document.createElement('button');
             offBtn.className = `px-3 py-1.5 text-left text-xs transition-colors whitespace-nowrap ${!isAnyShowing ? 'bg-blue-600/20 text-blue-400 font-bold border-l-2 border-blue-500' : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent'}`;
             offBtn.innerText = 'Off';
             offBtn.onclick = (e) => { e.stopPropagation(); setTrack(-1); };
             ccMenu.appendChild(offBtn);
 
-            // Track buttons
             for (let i = 0; i < player.textTracks.length; i++) {
                 let track = player.textTracks[i];
                 let isShowing = track.mode === 'showing';
@@ -403,10 +501,9 @@ if (empty($exts)) {
                 player.textTracks[i].mode = (i === index) ? 'showing' : 'hidden';
             }
             ccMenu.classList.add('hidden');
-            renderCcMenu(); // Re-render to highlight correct item
+            renderCcMenu(); 
         }
 
-        // Listen for embedded tracks loading asynchronously
         if (player.textTracks) {
             player.textTracks.addEventListener('addtrack', renderCcMenu);
             player.textTracks.addEventListener('removetrack', renderCcMenu);
@@ -418,18 +515,16 @@ if (empty($exts)) {
             ccMenu.classList.toggle('hidden');
         });
         
-        // Close menu when clicking elsewhere
         document.addEventListener('click', (e) => {
             if (!ccMenu.contains(e.target) && e.target !== btnCc) {
                 ccMenu.classList.add('hidden');
             }
         });
 
-        // Time & Progress update
         player.addEventListener('loadedmetadata', () => {
             seekBar.max = player.duration;
             timeTotal.textContent = formatTime(player.duration);
-            setTimeout(renderCcMenu, 200); // Allow browser time to parse embedded tracks
+            setTimeout(renderCcMenu, 200); 
         });
 
         player.addEventListener('timeupdate', () => {
@@ -443,7 +538,6 @@ if (empty($exts)) {
             player.currentTime = seekBar.value;
         });
 
-        // Volume
         const savedVol = localStorage.getItem('webplayer_volume');
         if (savedVol !== null) {
             player.volume = parseFloat(savedVol);
@@ -451,12 +545,11 @@ if (empty($exts)) {
             updateMuteIcon();
         }
 
-        // Loop State
         const savedLoop = localStorage.getItem('webplayer_loop');
         if (savedLoop !== null) {
             loopMode = parseInt(savedLoop);
         }
-        updateLoopButton(); // Initialize button state
+        updateLoopButton(); 
 
         function updateLoopButton() {
             if (loopMode === 0) {
@@ -510,7 +603,6 @@ if (empty($exts)) {
             updateMuteIcon();
         });
 
-        // Fullscreen
         btnFullscreen.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 videoContainer.requestFullscreen().catch(err => console.error(err));
@@ -527,11 +619,9 @@ if (empty($exts)) {
             }
         });
 
-        // Next / Prev Logic
         function playNext(manual = false) {
             if (currentPlaylistOrder.length === 0) return;
             
-            // If auto-advancing and "Loop Current" is active
             if (!manual && loopMode === 2) {
                 player.currentTime = 0;
                 player.play();
@@ -554,7 +644,6 @@ if (empty($exts)) {
                 if (idx >= 0 && idx + 1 < currentPlaylistOrder.length) {
                     playMedia(currentPlaylistOrder[idx + 1]);
                 } else if (loopMode === 1 && currentPlaylistOrder.length > 0) {
-                    // Loop All wraps around
                     playMedia(currentPlaylistOrder[0]);
                 }
             }
@@ -563,7 +652,6 @@ if (empty($exts)) {
         function playPrev() {
             if (currentPlaylistOrder.length === 0) return;
             
-            // If more than 3 seconds in, just restart current track
             if (player.currentTime > 3) {
                 player.currentTime = 0;
                 player.play();
@@ -575,7 +663,6 @@ if (empty($exts)) {
                 playMedia(currentPlaylistOrder[idx - 1]);
             } else if (idx === 0 && currentPlaylistOrder.length > 0) {
                 if (loopMode === 1) {
-                    // Loop All wraps around to the back
                     playMedia(currentPlaylistOrder[currentPlaylistOrder.length - 1]);
                 } else {
                     player.currentTime = 0;
@@ -586,11 +673,8 @@ if (empty($exts)) {
 
         btnNext.addEventListener('click', () => playNext(true));
         btnPrev.addEventListener('click', playPrev);
-
-        // Auto-advance track on ended
         player.addEventListener('ended', () => playNext(false));
 
-        // 3. Action Buttons Logic
         btnPlayAll.onclick = () => {
             if (currentPlaylistOrder.length > 0) playMedia(currentPlaylistOrder[0]);
         };
@@ -629,18 +713,14 @@ if (empty($exts)) {
                 copyMenu.classList.add('hidden');
                 
                 const format = btn.getAttribute('data-format');
-                
-                // Determine which extensions to export based on the active tab/category
                 let extsToExport = activeCategory === 'all' 
                     ? 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv' 
                     : activeCategory;
                 
-                // Build the absolute API URL
                 let apiUrl = window.location.origin + window.location.pathname + `?ext=${extsToExport}&format=${format}`;
                 if (isShuffle) apiUrl += '&shuffle=1';
                 if (searchQuery) apiUrl += `&search=${encodeURIComponent(searchQuery)}`;
                 
-                // Copy to clipboard safely
                 const tempInput = document.createElement('input');
                 tempInput.value = apiUrl;
                 document.body.appendChild(tempInput);
@@ -648,7 +728,6 @@ if (empty($exts)) {
                 document.execCommand('copy');
                 document.body.removeChild(tempInput);
 
-                // Visual confirmation
                 const originalHtml = btnCopyLink.innerHTML;
                 btnCopyLink.innerHTML = '<i class="fas fa-check text-[10px] md:text-sm"></i> <span class="text-[9px] md:text-xs font-bold leading-none">Copied!</span>';
                 btnCopyLink.classList.replace('bg-purple-600/80', 'bg-green-600');
@@ -662,43 +741,33 @@ if (empty($exts)) {
             });
         });
 
-        // Close menu when clicking elsewhere
         document.addEventListener('click', (e) => {
             if (!copyMenu.contains(e.target) && e.target !== btnCopyLink) {
                 copyMenu.classList.add('hidden');
             }
         });
 
-        // Helper: Extract filename from URL
         function getFilename(url) {
             try { return decodeURIComponent(url.split('/').pop()); } 
             catch(e) { return url; }
         }
 
-        // Helper: Extract extension from filename
         function getExtension(filename) {
             let parts = filename.split('.');
             return parts.length > 1 ? parts.pop().toLowerCase() : 'other';
         }
 
-        // Helper: Apply Search & Category Filters
         function getFilteredList(list) {
             let filtered = list;
-            
-            // Category filter
             if (currentTab === 'all' && activeCategory !== 'all') {
                 filtered = filtered.filter(url => getExtension(getFilename(url)) === activeCategory);
             }
-
-            // Search filter
             if (searchQuery) {
                 filtered = filtered.filter(url => getFilename(url).toLowerCase().includes(searchQuery.toLowerCase()));
             }
-            
             return filtered;
         }
 
-        // Render the filter tabs dynamically
         function renderCategoryTabs() {
             categoryTabs.innerHTML = '';
             
@@ -710,7 +779,6 @@ if (empty($exts)) {
             let exts = new Set();
             allMedia.forEach(url => exts.add(getExtension(getFilename(url))));
             
-            // Safety fallback if active category disappears during background reload
             if (activeCategory !== 'all' && !exts.has(activeCategory)) {
                 activeCategory = 'all';
             }
@@ -743,7 +811,6 @@ if (empty($exts)) {
             });
         }
 
-        // Helper: Toggle active UI state efficiently without rebuilding DOM
         function setElementActiveState(div, isPlaying) {
             if (isPlaying) {
                 div.className = "playlist-item p-3 mb-1 rounded-lg cursor-pointer flex items-center gap-3 group border bg-blue-600/20 text-blue-100 border-blue-500/30";
@@ -756,7 +823,6 @@ if (empty($exts)) {
             }
         }
 
-        // Helper: Create List Item DOM Element
         function createListItem(url) {
             let isPlaying = currentPlayingUrl === url;
             let filename = getFilename(url);
@@ -766,9 +832,7 @@ if (empty($exts)) {
             div.onclick = () => playMedia(url);
 
             div.innerHTML = `
-                <div>
-                    <i></i>
-                </div>
+                <div><i></i></div>
                 <div class="truncate flex-1 text-sm font-medium leading-relaxed" title="${filename.replace(/"/g, '&quot;')}">
                     ${filename}
                 </div>
@@ -780,7 +844,6 @@ if (empty($exts)) {
             return div;
         }
 
-        // Helper: Update ONLY the active playing item in the DOM
         function updateActiveItemState(newUrl) {
             if (currentlyPlayingElement) {
                 setElementActiveState(currentlyPlayingElement, false);
@@ -802,24 +865,19 @@ if (empty($exts)) {
             }
         }
 
-        // Helper: Scroll active item into view smoothly, but fallback to instant for large jumps
         function scrollToActiveItem(mode = false) {
             if (!currentlyPlayingElement) return;
-
             let forceCenter = mode === 'center' || mode === 'center_instant';
             let instant = mode === 'center_instant' || mode === 'instant';
 
-            // Prevent smooth-scroll bouncing on large lists with content-visibility
             if (!instant) {
                 const elTop = currentlyPlayingElement.offsetTop;
                 const contTop = container.scrollTop;
-                // If jumping more than a full screen length, use instant scroll to avoid rendering glitches
                 if (Math.abs(elTop - contTop) > container.clientHeight * 1.5) {
                     instant = true;
                 }
             }
 
-            // Tiny timeout ensures DOM is fully painted before scrolling calculation triggers
             setTimeout(() => {
                 if (currentlyPlayingElement) {
                     currentlyPlayingElement.scrollIntoView({ 
@@ -831,8 +889,6 @@ if (empty($exts)) {
         }
 
         btnLocate.addEventListener('click', () => {
-            // Ensure the item is visible by clearing search if necessary.
-            // (Does not reset the active category filter per user request)
             if (searchQuery !== '') {
                 searchInput.value = '';
                 searchQuery = '';
@@ -843,15 +899,14 @@ if (empty($exts)) {
             }
         });
 
-        // Render the active playlist (Optimized with DocumentFragment)
         function renderList(scrollMode = false) {
-            let previousScroll = container.scrollTop; // Save scroll position
+            let previousScroll = container.scrollTop; 
             container.innerHTML = '';
-            currentlyPlayingElement = null; // Reset tracker
+            currentlyPlayingElement = null; 
             
             let baseList = currentTab === 'all' ? allMedia : recentMedia;
             let list = getFilteredList(baseList);
-            currentPlaylistOrder = []; // Reset current visual/playback order
+            currentPlaylistOrder = []; 
 
             if (list.length === 0) {
                 container.innerHTML = `
@@ -863,16 +918,12 @@ if (empty($exts)) {
             }
 
             const fragment = document.createDocumentFragment();
-
-            // Render straight list
             list.forEach((url) => {
                 currentPlaylistOrder.push(url);
                 fragment.appendChild(createListItem(url));
             });
-            
-            container.appendChild(fragment); // Inject once for max performance
+            container.appendChild(fragment); 
 
-            // Restore scroll position or autoscroll
             requestAnimationFrame(() => {
                 if (scrollMode && currentlyPlayingElement) {
                     scrollToActiveItem(scrollMode === 'center');
@@ -882,16 +933,12 @@ if (empty($exts)) {
             });
         }
 
-        // Trigger Playback & Update Persisted Recents
         function playMedia(url) {
-            // Clear old sidecar subtitles
             player.innerHTML = '';
             
-            // Auto-detect and attach sidecar subtitles (.vtt or .srt, including language tags like .en.vtt)
             let baseFilename = getFilename(url).replace(/\.[^/.]+$/, "");
             let matchingSubs = allSubs.filter(subUrl => {
                 let subName = getFilename(subUrl);
-                // Matches "video.vtt", "video.srt", or "video.*.vtt" (e.g., "video.en.vtt")
                 return subName === baseFilename + '.vtt' || 
                        subName === baseFilename + '.srt' ||
                        subName.startsWith(baseFilename + '.');
@@ -906,21 +953,18 @@ if (empty($exts)) {
                 let ext = getExtension(subName).toUpperCase();
                 let label = 'Sub ' + (index + 1);
                 
-                // Extract language tag if it exists (e.g., ".en-eEY6OEpapPo.vtt" or ".pt-BR.vtt")
                 let langMatch = subName.substring(baseFilename.length);
                 if (langMatch.startsWith('.') && langMatch.split('.').length > 2) {
                     let middle = langMatch.substring(1, langMatch.lastIndexOf('.'));
                     let langCode = middle.toUpperCase();
                     
-                    // Check if it ends with - followed by 11 characters (common for yt-dlp hashes)
                     let lastDashIndex = middle.lastIndexOf('-');
                     if (lastDashIndex > 0 && middle.length - lastDashIndex - 1 === 11) {
                         langCode = middle.substring(0, lastDashIndex).toUpperCase();
                     }
-                    
-                    label = langCode; // Display clean language (e.g., "EN" or "PT-BR")
+                    label = langCode; 
                 } else {
-                    label = ext; // Fallback to "VTT" or "SRT"
+                    label = ext; 
                 }
                 
                 track.label = label;
@@ -935,19 +979,16 @@ if (empty($exts)) {
                 currentPlayingUrl = url;
                 nowPlaying.innerText = getFilename(url);
             } else {
-                player.play(); // toggle safety
+                player.play(); 
             }
 
-            // Update persistent recents
             recentMedia = recentMedia.filter(u => u !== url);
             recentMedia.unshift(url);
-            if (recentMedia.length > 50) recentMedia.pop(); // Keep last 50
+            if (recentMedia.length > 50) recentMedia.pop(); 
             localStorage.setItem('webplayer_recent', JSON.stringify(recentMedia));
 
             btnLocate.classList.remove('hidden');
 
-            // Only rebuild the whole DOM if we are on the Recents tab (because order changes).
-            // Otherwise, efficiently update just the active CSS classes.
             if (currentTab === 'all') {
                 updateActiveItemState(url);
                 requestAnimationFrame(() => scrollToActiveItem(false));
@@ -956,7 +997,6 @@ if (empty($exts)) {
             }
         }
 
-        // Tab Switching Logic
         function switchTab(tab) {
             currentTab = tab;
             if (tab === 'all') {
@@ -976,14 +1016,12 @@ if (empty($exts)) {
         let searchTimeout;
         searchInput.addEventListener('input', (e) => {
             searchQuery = e.target.value;
-            // Debounce search typing for better performance
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
                 renderList();
             }, 150);
         });
 
-        // Background Playlist Reload
         btnReload.addEventListener('click', () => {
             const icon = btnReload.querySelector('i');
             icon.classList.add('fa-spin', 'text-blue-400');
@@ -1014,7 +1052,101 @@ if (empty($exts)) {
                 });
         });
 
-        // Initialize App Directly
+        // --- YT-DLP Download Logic ---
+        const btnYtdlpOpen = document.getElementById('btn-ytdlp-open');
+        if (btnYtdlpOpen) {
+            const modal = document.getElementById('ytdlp-modal');
+            const modalContent = modal.querySelector('div');
+            const btnCancel = document.getElementById('btn-ytdlp-cancel');
+            const btnSubmit = document.getElementById('btn-ytdlp-submit');
+            const inputId = document.getElementById('ytdlp-id');
+            const inputSecret = document.getElementById('ytdlp-secret');
+            const statusDiv = document.getElementById('ytdlp-status');
+            
+            // Restore secret key from localstorage if present
+            inputSecret.value = localStorage.getItem('ytdlp_secret') || '';
+
+            const showModal = () => {
+                modal.classList.remove('hidden');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    modalContent.classList.remove('scale-95');
+                    inputId.focus();
+                }, 10);
+            };
+
+            const hideModal = () => {
+                modal.classList.add('opacity-0');
+                modalContent.classList.add('scale-95');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    statusDiv.classList.add('hidden');
+                    inputId.value = '';
+                }, 300);
+            };
+
+            btnYtdlpOpen.addEventListener('click', showModal);
+            btnCancel.addEventListener('click', hideModal);
+
+            btnSubmit.addEventListener('click', async () => {
+                const id = inputId.value.trim();
+                const secret = inputSecret.value.trim();
+                const format = document.getElementById('ytdlp-format').value;
+
+                if (!id || !secret) {
+                    statusDiv.className = 'text-xs rounded p-3 bg-red-900/50 text-red-400 border border-red-800 mt-4';
+                    statusDiv.innerText = 'Please provide both the YouTube ID/URL and your Admin Secret Key.';
+                    statusDiv.classList.remove('hidden');
+                    return;
+                }
+
+                localStorage.setItem('ytdlp_secret', secret);
+                
+                statusDiv.className = 'text-xs rounded p-3 bg-blue-900/50 text-blue-400 border border-blue-800 mt-4 flex items-center gap-2';
+                statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading and extracting media... this may take a while.';
+                statusDiv.classList.remove('hidden');
+                
+                btnSubmit.disabled = true;
+                btnSubmit.classList.add('opacity-50', 'cursor-not-allowed');
+                btnCancel.disabled = true;
+
+                try {
+                    const res = await fetch('?action=ytdlp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id, secret, format })
+                    });
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        throw new Error(data.error || 'Failed to download.');
+                    }
+
+                    statusDiv.className = 'text-xs rounded p-3 bg-green-900/50 text-green-400 border border-green-800 mt-4';
+                    statusDiv.innerText = data.message || 'Download complete!';
+                    
+                    // Refresh the library
+                    btnReload.click();
+                    
+                    setTimeout(() => {
+                        hideModal();
+                        btnSubmit.disabled = false;
+                        btnCancel.disabled = false;
+                        btnSubmit.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }, 2000);
+
+                } catch (err) {
+                    statusDiv.className = 'text-xs rounded p-3 bg-red-900/50 text-red-400 border border-red-800 mt-4 break-words';
+                    statusDiv.innerText = err.message;
+                    btnSubmit.disabled = false;
+                    btnCancel.disabled = false;
+                    btnSubmit.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            });
+        }
+
+        // Init
         renderCategoryTabs();
         renderList();
     </script>
