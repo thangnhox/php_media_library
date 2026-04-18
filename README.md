@@ -16,6 +16,7 @@ Just drop index.php into a folder containing your videos or music, and it will a
 - Playback Controls: Shuffle, Random, Loop (All/Current), and Play All.
 - M3U / API Generator: Generate dynamic playlists for external players (like VLC) via simple URL parameters.
 - Cloudflare Safe: Built-in reverse proxy detection for accurate URL generation.
+- Supports yt-dlp feature to download youtube id that's not available in library (protected by PHP_SECRET_KEY env).
 
 ## 🛠️ Installation & Usage
 
