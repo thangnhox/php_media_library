@@ -120,7 +120,7 @@ if (empty($exts)) {
     header('Content-Type: text/html; charset=utf-8');
 
     // Generate direct JSON array for JavaScript to avoid fetch/CORS/parsing issues
-    $media_extensions = ['mp4','mkv','webm','ogg','mp3','wav','flac','m4a','aac','m4v','mov','avi','wmv'];
+    $media_extensions = ['mp4','mkv','webm','ogg','mp3','wav','flac','m4a','aac','m4v','mov','avi','wmv', 'mka'];
     $sub_extensions = ['vtt', 'srt'];
     
     $js_media_files = [];
