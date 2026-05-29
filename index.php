@@ -1026,7 +1026,7 @@ if (empty($exts)) {
             const icon = btnReload.querySelector('i');
             icon.classList.add('fa-spin', 'text-blue-400');
             
-            const mediaExts = 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv';
+            const mediaExts = 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv,mka';
             const subExts = 'vtt,srt';
             const fetchUrl = `<?= htmlspecialchars($self) ?>?ext=${mediaExts},${subExts}&format=txt`;
             
