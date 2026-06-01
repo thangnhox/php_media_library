@@ -95,7 +95,6 @@ $files = [];
 $extensions = [];
 
 foreach (scandir(__DIR__) as $f) {
-    // if (!is_file($f)) continue;
     if (!is_file(__DIR__ . '/' . $f)) continue;
 
     $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
@@ -398,7 +397,10 @@ if (empty($exts)) {
         let searchQuery = '';
         let isShuffle = false;
         let currentPlaylistOrder = []; // Tracks actual playback sequence
-        let activeCategory = 'all';
+        
+        // Use a Set to track multiple toggled extensions simultaneously
+        let activeCategories = new Set();
+        
         let currentlyPlayingElement = null; // tracks the active DOM element
         let controlsTimeout;
         let loopMode = 0; // 0 = Off, 1 = All, 2 = Current
@@ -713,9 +715,12 @@ if (empty($exts)) {
                 copyMenu.classList.add('hidden');
                 
                 const format = btn.getAttribute('data-format');
-                let extsToExport = activeCategory === 'all' 
-                    ? 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv' 
-                    : activeCategory;
+                
+                // Construct the targeted export extensions list based on current active multiple toggles
+                let defaultExts = 'mp4,mkv,webm,ogg,mp3,wav,flac,m4a,aac,m4v,mov,avi,wmv,mka';
+                let extsToExport = activeCategories.size === 0 
+                    ? defaultExts 
+                    : Array.from(activeCategories).join(',');
                 
                 let apiUrl = window.location.origin + window.location.pathname + `?ext=${extsToExport}&format=${format}`;
                 if (isShuffle) apiUrl += '&shuffle=1';
@@ -759,8 +764,9 @@ if (empty($exts)) {
 
         function getFilteredList(list) {
             let filtered = list;
-            if (currentTab === 'all' && activeCategory !== 'all') {
-                filtered = filtered.filter(url => getExtension(getFilename(url)) === activeCategory);
+            // Now checks against a Set instead of a single string
+            if (currentTab === 'all' && activeCategories.size > 0) {
+                filtered = filtered.filter(url => activeCategories.has(getExtension(getFilename(url))));
             }
             if (searchQuery) {
                 filtered = filtered.filter(url => getFilename(url).toLowerCase().includes(searchQuery.toLowerCase()));
@@ -779,8 +785,11 @@ if (empty($exts)) {
             let exts = new Set();
             allMedia.forEach(url => exts.add(getExtension(getFilename(url))));
             
-            if (activeCategory !== 'all' && !exts.has(activeCategory)) {
-                activeCategory = 'all';
+            // Clean out selected categories that no longer exist in the directory
+            for (let ext of activeCategories) {
+                if (!exts.has(ext)) {
+                    activeCategories.delete(ext);
+                }
             }
 
             let sortedExts = Array.from(exts).sort();
@@ -793,20 +802,35 @@ if (empty($exts)) {
             categoryTabs.style.display = 'flex';
 
             let allBtn = document.createElement('button');
+            let isAll = activeCategories.size === 0;
             allBtn.className = `flex-shrink-0 px-3 py-1 rounded-full text-xs font-bold transition-colors border ${
-                activeCategory === 'all' ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
+                isAll ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
             }`;
             allBtn.innerText = 'All';
-            allBtn.onclick = () => { activeCategory = 'all'; renderCategoryTabs(); renderList(); };
+            allBtn.onclick = () => { 
+                activeCategories.clear(); 
+                renderCategoryTabs(); 
+                renderList(); 
+            };
             categoryTabs.appendChild(allBtn);
 
             sortedExts.forEach(ext => {
                 let btn = document.createElement('button');
+                let isActive = activeCategories.has(ext);
+                
                 btn.className = `flex-shrink-0 px-3 py-1 rounded-full text-xs font-bold transition-colors border ${
-                    activeCategory === ext ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
+                    isActive ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
                 }`;
                 btn.innerText = `.${ext}`;
-                btn.onclick = () => { activeCategory = ext; renderCategoryTabs(); renderList(); };
+                btn.onclick = () => { 
+                    if (activeCategories.has(ext)) {
+                        activeCategories.delete(ext);
+                    } else {
+                        activeCategories.add(ext);
+                    }
+                    renderCategoryTabs(); 
+                    renderList(); 
+                };
                 categoryTabs.appendChild(btn);
             });
         }
